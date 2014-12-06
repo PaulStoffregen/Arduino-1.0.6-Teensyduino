@@ -464,7 +464,9 @@ public class EditorStatus extends JPanel /*implements ActionListener*/ {
             message += "  \"" + _("Show verbose output during compilation") + "\"\n";
             message += "  " + _("enabled in File > Preferences.") + "\n";
           }
-          message += _("Arduino: ") + Base.VERSION_NAME + " (" + System.getProperty("os.name") + "), ";
+          message += _("Arduino: ") + Base.VERSION_NAME;
+          message += " + Td: " + Base.teensyduino_version;
+          message += " (" + System.getProperty("os.name") + "), ";
           message += _("Board: ") + "\"" + Base.getBoardPreferences().get("name") + "\"\n";
           message += editor.console.consoleTextPane.getText().trim();
           Clipboard clipboard = Toolkit.getDefaultToolkit().getSystemClipboard();

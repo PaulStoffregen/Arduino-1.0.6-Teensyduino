@@ -46,6 +46,8 @@ public class Compiler implements MessageConsumer {
   Sketch sketch;
   String buildPath;
   String primaryClassName;
+  String gccCommand;
+  String gppCommand;
   boolean verbose;
   boolean sketchIsCompiled;
 
@@ -77,6 +79,14 @@ public class Compiler implements MessageConsumer {
 
     String avrBasePath = Base.getAvrBasePath();
     Map<String, String> boardPreferences = Base.getBoardPreferences();
+    gccCommand = boardPreferences.get("build.command.gcc");
+    gppCommand = boardPreferences.get("build.command.g++");
+    String arCommand = boardPreferences.get("build.command.ar");
+    String objcopyCommand = boardPreferences.get("build.command.objcopy");
+    if (gccCommand == null) gccCommand = "avr-gcc";
+    if (gppCommand == null) gppCommand = "avr-g++";
+    if (arCommand == null) arCommand = "avr-ar";
+    if (objcopyCommand == null) objcopyCommand = "avr-objcopy";
     String core = boardPreferences.get("build.core");
     if (core == null) {
     	RunnerException re = new RunnerException(_("No board selected; please choose a board from the Tools > Board menu."));
@@ -211,7 +221,7 @@ public class Compiler implements MessageConsumer {
 
    String runtimeLibraryName = buildPath + File.separator + "core.a";
    List baseCommandAR = new ArrayList(Arrays.asList(new String[] {
-     avrBasePath + "avr-ar",
+     avrBasePath + arCommand,
      "rcs",
      runtimeLibraryName
    }));
@@ -229,28 +239,67 @@ public class Compiler implements MessageConsumer {
     if ( atmega2560.equals(boardPreferences.get("build.mcu")) ) {
         optRelax = new String(",--relax");
     }
+    if (Base.getBoardMenuPreferenceBoolean("build.linker_relaxation")) {
+        optRelax = new String(",--relax");
+    }
    sketch.setCompilingProgress(60);
     List baseCommandLinker = new ArrayList(Arrays.asList(new String[] {
-      avrBasePath + "avr-gcc",
+      avrBasePath + gccCommand,
       "-Os",
       "-Wl,--gc-sections"+optRelax,
-      "-mmcu=" + boardPreferences.get("build.mcu"),
-      "-o",
-      buildPath + File.separator + primaryClassName + ".elf"
+      (boardPreferences.get("build.cpu") != null) ?
+        "-mcpu=" + boardPreferences.get("build.cpu") :
+        "-mmcu=" + boardPreferences.get("build.mcu"),
     }));
+    for (int i = 1; true; i++) {
+      String extraOption = boardPreferences.get("build.linkoption" + i);
+      if (extraOption == null) break;
+      baseCommandLinker.add(extraOption);
+    }
+    String linkerScript = boardPreferences.get("build.linkscript");
+    if (linkerScript != null) {
+      baseCommandLinker.add("-T" + corePath + File.separator + linkerScript);
+    }
+    baseCommandLinker.add("-o");
+    baseCommandLinker.add(buildPath + File.separator + primaryClassName + ".elf");
 
     for (File file : objectFiles) {
       baseCommandLinker.add(file.getAbsolutePath());
     }
 
-    baseCommandLinker.add(runtimeLibraryName);
+    if (boardPreferences.get("build.noarchive") == null) {
+      baseCommandLinker.add(runtimeLibraryName);
+    } else {
+      for(File file : coreObjectFiles) {
+        // baseCommandLinker.add(file.getAbsolutePath());
+        baseCommandLinker.add(file.toString());
+      }
+    }
     baseCommandLinker.add("-L" + buildPath);
+    for (int i = 1; true; i++) {
+      String additionalObject = boardPreferences.get("build.additionalobject" + i);
+      if (additionalObject == null) break;
+      baseCommandLinker.add(additionalObject);
+    }
     baseCommandLinker.add("-lm");
 
     execAsynchronously(baseCommandLinker);
 
+    // 4b. run a command to add data to the .elf file
+    String elfAddCommand = Base.getBoardMenuPreference("build.elfpatch");
+    if (elfAddCommand != null) {
+      String scriptBasePath = Base.getHardwarePath() + "/tools/";
+      List elfPatcher = new ArrayList();
+      elfPatcher.add(scriptBasePath + elfAddCommand);
+      //elfPatcher.add("-v");
+      elfPatcher.add("-mmcu=" + boardPreferences.get("build.mcu"));
+      elfPatcher.add(buildPath + File.separator + primaryClassName + ".elf");
+      elfPatcher.add(sketch.getFolder() + File.separator + "disk");
+      execAsynchronously(elfPatcher);
+    }
+
     List baseCommandObjcopy = new ArrayList(Arrays.asList(new String[] {
-      avrBasePath + "avr-objcopy",
+      avrBasePath + objcopyCommand,
       "-O",
       "-R",
     }));
@@ -282,6 +331,18 @@ public class Compiler implements MessageConsumer {
     
     sketch.setCompilingProgress(90);
    
+    // 7. run a post comile script, to alert external tools to new files
+    String postCompileScript = boardPreferences.get("build.post_compile_script");
+    if (postCompileScript != null) {
+      String scriptBasePath = Base.getHardwarePath() + "/tools/";
+      List commandScript = new ArrayList();
+      commandScript.add(scriptBasePath + postCompileScript);
+      commandScript.add("-board=" + Preferences.get("board"));
+      commandScript.add("-tools=" + scriptBasePath);
+      commandScript.add("-path=" + buildPath);
+      commandScript.add("-file=" + primaryClassName);
+      execTeensySimple(commandScript);
+    }
     return true;
   }
 
@@ -318,7 +379,7 @@ public class Compiler implements MessageConsumer {
     for (File file : sSources) {
       String objectPath = buildPath + File.separator + file.getName() + ".o";
       objectPaths.add(new File(objectPath));
-      execAsynchronously(getCommandCompilerS(avrBasePath, includePaths,
+      execAsynchronously(getCommandCompilerS(avrBasePath, gccCommand, includePaths,
                                              file.getAbsolutePath(),
                                              objectPath,
                                              boardPreferences));
@@ -331,7 +392,7 @@ public class Compiler implements MessageConsumer {
         File dependFile = new File(dependPath);
         objectPaths.add(objectFile);
         if (is_already_compiled(file, objectFile, dependFile, boardPreferences)) continue;
-        execAsynchronously(getCommandCompilerC(avrBasePath, includePaths,
+        execAsynchronously(getCommandCompilerC(avrBasePath, gccCommand, includePaths,
                                                file.getAbsolutePath(),
                                                objectPath,
                                                boardPreferences));
@@ -344,7 +405,7 @@ public class Compiler implements MessageConsumer {
         File dependFile = new File(dependPath);
         objectPaths.add(objectFile);
         if (is_already_compiled(file, objectFile, dependFile, boardPreferences)) continue;
-        execAsynchronously(getCommandCompilerCPP(avrBasePath, includePaths,
+        execAsynchronously(getCommandCompilerCPP(avrBasePath, gppCommand, includePaths,
                                                  file.getAbsolutePath(),
                                                  objectPath,
                                                  boardPreferences));
@@ -357,6 +418,7 @@ public class Compiler implements MessageConsumer {
     boolean ret=true;
     try {
       //System.out.println("\n  is_already_compiled: begin checks: " + obj.getPath());
+      if (src.getName().equals("mk20dx128.c")) return false; // ugly hack for TIME_T always compiled
       if (!obj.exists()) return false;  // object file (.o) does not exist
       if (!dep.exists()) return false;  // dep file (.d) does not exist
       long src_modified = src.lastModified();
@@ -371,6 +433,7 @@ public class Compiler implements MessageConsumer {
           line = line.substring(0, line.length() - 1);
         }
         line = line.trim();
+        line = line.replaceAll("\\\\ ", " ");
         if (line.length() == 0) continue; // ignore blank lines
         if (need_obj_parse) {
           // line is supposed to be the object file - make sure it really is!
@@ -484,6 +547,32 @@ public class Compiler implements MessageConsumer {
     }
   }
 
+  private void execTeensySimple(List commandList) throws RunnerException {
+    String[] command = new String[commandList.size()];
+    commandList.toArray(command);
+    Process process;
+    int result = 0;
+    try {
+      process = Runtime.getRuntime().exec(command);
+    } catch (IOException e) {
+      RunnerException re = new RunnerException(e.getMessage());
+      re.hideStackTrace();
+      throw re;
+    }
+    MessageSiphon in = new MessageSiphon(process.getInputStream(), this);
+    boolean running = true;
+    while (running) {
+      try {
+        result = process.waitFor();
+        running = false;
+      } catch (InterruptedException ignored) { }
+    }
+    if (result != 0) {
+      RunnerException re = new RunnerException("Error communicating with Teensy Loader");
+      re.hideStackTrace();
+      throw re;
+    }
+  }
 
   /**
    * Part of the MessageConsumer interface, this is called
@@ -505,8 +594,12 @@ public class Compiler implements MessageConsumer {
   
     // look for error line, which contains file name, line number,
     // and at least the first line of the error message
-    String errorFormat = "([\\w\\d_]+.\\w+):(\\d+):\\s*error:\\s*(.*)\\s*";
+    String errorFormat = "([\\w\\d_]+\\.\\w+):(\\d+):\\s*error:\\s*(.*)\\s*";
     String[] pieces = PApplet.match(s, errorFormat);
+    if (pieces == null) {
+      errorFormat = "([\\w\\d_]+\\.\\w+):(\\d+):\\d+:\\s*error:\\s*(.*)\\s*";
+      pieces = PApplet.match(s, errorFormat);
+    }
 
 //    if (pieces != null && exception == null) {
 //      exception = sketch.placeException(pieces[3], pieces[1], PApplet.parseInt(pieces[2]) - 1);
@@ -567,6 +660,36 @@ public class Compiler implements MessageConsumer {
         error = _("'Keyboard' only supported on the Arduino Leonardo");
         //msg = _("\nThe 'Keyboard' class is only supported on the Arduino Leonardo.\n\n");
       }
+
+      if (Base.getBoardPreferences().get("build.core").equals("teensy")) {
+        if (pieces[3].trim().equals("'Keyboard' was not declared in this scope")
+	 || pieces[3].trim().equals("‘Keyboard’ was not declared in this scope"))
+	  msg = "\nTo make a USB Keyboard, please select Keyboard from the Tools -> USB Type menu\n\n";
+        if (pieces[3].trim().equals("'Mouse' was not declared in this scope")
+	 || pieces[3].trim().equals("‘Mouse’ was not declared in this scope"))
+	  msg = "\nTo make a USB Mouse, please select Mouse from the Tools -> USB Type menu\n\n";
+        if (pieces[3].trim().equals("'Joystick' was not declared in this scope")
+	 || pieces[3].trim().equals("‘Joystick’ was not declared in this scope"))
+	  msg = "\nTo make a USB Joystick, please select Joystick from the Tools -> USB Type menu\n\n";
+        if (pieces[3].trim().equals("'Disk' was not declared in this scope")
+	 || pieces[3].trim().equals("‘Disk’ was not declared in this scope"))
+	  msg = "\nTo make a USB Disk, please select Disk from the Tools -> USB Type menu\n\n";
+        if (pieces[3].trim().equals("'usbMIDI' was not declared in this scope")
+	 || pieces[3].trim().equals("‘usbMIDI’ was not declared in this scope"))
+	  msg = "\nTo make a USB MIDI device, please select MIDI from the Tools -> USB Type menu\n\n";
+        if (pieces[3].trim().equals("'RawHID' was not declared in this scope")
+	 || pieces[3].trim().equals("‘RawHID’ was not declared in this scope"))
+	  msg = "\nTo make a RawHID device, please select RawHID from the Tools -> USB Type menu\n\n";
+        if (pieces[3].trim().equals("'FlightSimCommand' does not name a type")
+	 || pieces[3].trim().equals("‘FlightSimCommand’ does not name a type")
+         || pieces[3].trim().equals("'FlightSimInteger' does not name a type")
+	 || pieces[3].trim().equals("‘FlightSimInteger’ does not name a type")
+         || pieces[3].trim().equals("'FlightSimFloat' does not name a type")
+	 || pieces[3].trim().equals("‘FlightSimFloat’ does not name a type")
+         || pieces[3].trim().equals("'FlightSim' was not declared in this scope")
+	 || pieces[3].trim().equals("‘FlightSim’ was not declared in this scope"))
+	  msg = "\nTo make a Flight Simulator device, please select Flight Sim Controls from the Tools -> USB Type menu\n\n";
+      }
       
       RunnerException e = null;
       if (!sketchIsCompiled) {
@@ -607,19 +730,40 @@ public class Compiler implements MessageConsumer {
 
   /////////////////////////////////////////////////////////////////////////////
 
-  static private List getCommandCompilerS(String avrBasePath, List includePaths,
+  static private void menu_defines(List cmd, Map<String, String> boardPrefs) {
+    for (int i=0; i<10; i++) {
+      String define = Base.getBoardMenuPreference("build.define" + i);
+      if (define != null) cmd.add(define);
+    }
+  }
+  static private void serial_number_define(List cmd, Map<String, String> boardPrefs) {
+    if (Base.getBoardMenuPreferenceBoolean("build.serial_number")) {
+      Random r = new Random();
+      cmd.add("-DSERIALNUM=" + r.nextInt());
+    }
+  }
+
+  static private List getCommandCompilerS(String avrBasePath, String gccCmd, List includePaths,
     String sourceName, String objectName, Map<String, String> boardPreferences) {
     List baseCommandCompiler = new ArrayList(Arrays.asList(new String[] {
-      avrBasePath + "avr-gcc",
+      avrBasePath + gccCmd,
       "-c", // compile, don't link
       "-g", // include debugging info (so errors include line numbers)
       "-x","assembler-with-cpp",
-      "-mmcu=" + boardPreferences.get("build.mcu"),
-      "-DF_CPU=" + boardPreferences.get("build.f_cpu"),      
+      (boardPreferences.get("build.cpu") != null) ?
+        "-mcpu=" + boardPreferences.get("build.cpu") :
+        "-mmcu=" + boardPreferences.get("build.mcu"),
+      "-DF_CPU=" + Base.getBoardMenuPreference("build.f_cpu"),
       "-DARDUINO=" + Base.REVISION,
       "-DUSB_VID=" + boardPreferences.get("build.vid"),
       "-DUSB_PID=" + boardPreferences.get("build.pid"),
     }));
+    for (int i = 1; true; i++) {
+      String extraOption = boardPreferences.get("build.option" + i);
+      if (extraOption == null) break;
+      baseCommandCompiler.add(extraOption);
+    }
+    menu_defines(baseCommandCompiler, boardPreferences);
 
     for (int i = 0; i < includePaths.size(); i++) {
       baseCommandCompiler.add("-I" + (String) includePaths.get(i));
@@ -632,24 +776,45 @@ public class Compiler implements MessageConsumer {
   }
 
   
-  static private List getCommandCompilerC(String avrBasePath, List includePaths,
+  static private List getCommandCompilerC(String avrBasePath, String gccCmd, List includePaths,
     String sourceName, String objectName, Map<String, String> boardPreferences) {
 
     List baseCommandCompiler = new ArrayList(Arrays.asList(new String[] {
-      avrBasePath + "avr-gcc",
+      avrBasePath + gccCmd,
       "-c", // compile, don't link
       "-g", // include debugging info (so errors include line numbers)
       "-Os", // optimize for size
       Preferences.getBoolean("build.verbose") ? "-Wall" : "-w", // show warnings if verbose
       "-ffunction-sections", // place each function in its own section
       "-fdata-sections",
-      "-mmcu=" + boardPreferences.get("build.mcu"),
-      "-DF_CPU=" + boardPreferences.get("build.f_cpu"),
+      (boardPreferences.get("build.cpu") != null) ?
+        "-mcpu=" + boardPreferences.get("build.cpu") :
+        "-mmcu=" + boardPreferences.get("build.mcu"),
+      "-DF_CPU=" + Base.getBoardMenuPreference("build.f_cpu"),
       "-MMD", // output dependancy info
       "-DUSB_VID=" + boardPreferences.get("build.vid"),
       "-DUSB_PID=" + boardPreferences.get("build.pid"),
       "-DARDUINO=" + Base.REVISION, 
     }));
+    for (int i = 1; true; i++) {
+      String extraOption = boardPreferences.get("build.option" + i);
+      if (extraOption == null) break;
+      baseCommandCompiler.add(extraOption);
+    }
+    if (boardPreferences.get("build.thumb") != null) {
+      baseCommandCompiler.add("-mthumb");
+    }
+    if (boardPreferences.get("build.time_t") != null) {
+      Date d = new Date();
+      Calendar cal = new GregorianCalendar();
+      long current = d.getTime()/1000;
+      long timezone = cal.get(cal.ZONE_OFFSET)/1000;
+      long daylight = cal.get(cal.DST_OFFSET)/1000;
+      long time_t_value = current + timezone + daylight;
+      baseCommandCompiler.add("-DTIME_T=" + time_t_value);
+    }
+    menu_defines(baseCommandCompiler, boardPreferences);
+    serial_number_define(baseCommandCompiler, boardPreferences);
 		
     for (int i = 0; i < includePaths.size(); i++) {
       baseCommandCompiler.add("-I" + (String) includePaths.get(i));
@@ -663,12 +828,12 @@ public class Compiler implements MessageConsumer {
   }
 	
 	
-  static private List getCommandCompilerCPP(String avrBasePath,
+  static private List getCommandCompilerCPP(String avrBasePath, String gppCmd,
     List includePaths, String sourceName, String objectName,
     Map<String, String> boardPreferences) {
     
     List baseCommandCompilerCPP = new ArrayList(Arrays.asList(new String[] {
-      avrBasePath + "avr-g++",
+      avrBasePath + gppCmd,
       "-c", // compile, don't link
       "-g", // include debugging info (so errors include line numbers)
       "-Os", // optimize for size
@@ -676,13 +841,32 @@ public class Compiler implements MessageConsumer {
       "-fno-exceptions",
       "-ffunction-sections", // place each function in its own section
       "-fdata-sections",
-      "-mmcu=" + boardPreferences.get("build.mcu"),
-      "-DF_CPU=" + boardPreferences.get("build.f_cpu"),
+      (boardPreferences.get("build.cpu") != null) ?
+        "-mcpu=" + boardPreferences.get("build.cpu") :
+        "-mmcu=" + boardPreferences.get("build.mcu"),
+      "-DF_CPU=" + Base.getBoardMenuPreference("build.f_cpu"),
       "-MMD", // output dependancy info
       "-DUSB_VID=" + boardPreferences.get("build.vid"),
       "-DUSB_PID=" + boardPreferences.get("build.pid"),      
       "-DARDUINO=" + Base.REVISION,
     }));
+    for (int i = 1; true; i++) {
+      String extraOption = boardPreferences.get("build.option" + i);
+      if (extraOption == null) break;
+      baseCommandCompilerCPP.add(extraOption);
+    }
+    for (int i = 1; true; i++) {
+      String extraOption = boardPreferences.get("build.cppoption" + i);
+      if (extraOption == null) break;
+      baseCommandCompilerCPP.add(extraOption);
+    }
+    if (Base.getBoardMenuPreferenceBoolean("build.elide_constructors"))
+      baseCommandCompilerCPP.add("-felide-constructors");  // optimization used by string class
+    if (Base.getBoardMenuPreferenceBoolean("build.cpp0x"))
+      baseCommandCompilerCPP.add("-std=c++0x");  // rvalue ref feature used by string class
+    if (Base.getBoardMenuPreferenceBoolean("build.gnu0x"))
+      baseCommandCompilerCPP.add("-std=gnu++0x");  // rvalue ref feature used by string class
+    menu_defines(baseCommandCompilerCPP, boardPreferences);
 
     for (int i = 0; i < includePaths.size(); i++) {
       baseCommandCompilerCPP.add("-I" + (String) includePaths.get(i));

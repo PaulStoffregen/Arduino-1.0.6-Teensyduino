@@ -1636,6 +1636,9 @@ public class Sketch {
     String maxsizeString = Base.getBoardPreferences().get("upload.maximum_size");
     if (maxsizeString == null) return;
     long maxsize = Integer.parseInt(maxsizeString);
+    String maxramString = Base.getBoardPreferences().get("upload.maximum_ram_size");
+    long maxram = -1;
+    if (maxramString != null) maxram = Integer.parseInt(maxramString);
     Sizer sizer = new Sizer(buildPath, suggestedClassName);
       try {
       size = sizer.computeSize();
@@ -1645,6 +1648,14 @@ public class Sketch {
 	  size, maxsize
 	)
       );
+      if (maxram >= 0) {
+        System.out.println(
+	  I18n.format(
+	    _("Estimated memory use: {0} bytes (of a {1} byte maximum)"),
+	    sizer.getDataSize(), maxram
+	  )
+        );
+      }
     } catch (RunnerException e) {
       System.err.println(I18n.format(_("Couldn't determine program size: {0}"), e.getMessage()));
     }

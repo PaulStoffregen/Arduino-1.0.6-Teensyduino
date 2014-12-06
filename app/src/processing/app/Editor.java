@@ -101,6 +101,12 @@ public class Editor extends JFrame implements RunnerListener {
   static SerialMenuListener serialMenuListener;
   static SerialMonitor serialMonitor;
   
+  static ArrayList<JMenu> customMenu;
+  static ArrayList<String> customMenuTitle;
+  static ArrayList<String> customMenuIdentifier;
+  static ArrayList<radioButtonMenuListener> customMenuListener;
+  static boolean customMenusInitialized=false;
+
   EditorHeader header;
   EditorStatus status;
   EditorConsole console;
@@ -169,6 +175,8 @@ public class Editor extends JFrame implements RunnerListener {
     // http://dev.processing.org/bugs/show_bug.cgi?id=440
     setDefaultCloseOperation(JFrame.DO_NOTHING_ON_CLOSE);
 
+    initializeCustomMenus();
+
     // When bringing a window to front, let the Base know
     addWindowListener(new WindowAdapter() {
         public void windowActivated(WindowEvent e) {
@@ -180,6 +188,9 @@ public class Editor extends JFrame implements RunnerListener {
           sketchMenu.insert(importMenu, 4);
           toolsMenu.insert(boardsMenu, numTools);
           toolsMenu.insert(serialMenu, numTools + 1);
+          for (int i=0; i < customMenu.size(); i++) {
+            toolsMenu.insert(customMenu.get(i), numTools + 2 + i);
+          }
         }
 
         // added for 1.0.5
@@ -191,6 +202,9 @@ public class Editor extends JFrame implements RunnerListener {
           sketchMenu.remove(importMenu);
           toolsMenu.remove(boardsMenu);
           toolsMenu.remove(serialMenu);
+          for (int i=0; i < customMenu.size(); i++) {
+            toolsMenu.remove(customMenu.get(i));
+          }
         }
       });
 
@@ -503,6 +517,7 @@ public class Editor extends JFrame implements RunnerListener {
 
     if (sketchbookMenu == null) {
       sketchbookMenu = new JMenu(_("Sketchbook"));
+      MenuScroller.setScrollerFor(sketchbookMenu);
       base.rebuildSketchbookMenu(sketchbookMenu);
     }
     fileMenu.add(sketchbookMenu);
@@ -510,6 +525,7 @@ public class Editor extends JFrame implements RunnerListener {
     if (examplesMenu == null) {
       examplesMenu = new JMenu(_("Examples"));
       base.rebuildExamplesMenu(examplesMenu);
+      MenuScroller.setScrollerFor(examplesMenu);
     }
     fileMenu.add(examplesMenu);
 
@@ -629,6 +645,7 @@ public class Editor extends JFrame implements RunnerListener {
 
     if (importMenu == null) {
       importMenu = new JMenu(_("Import Library..."));
+      MenuScroller.setScrollerFor(importMenu);
       base.rebuildImportMenu(importMenu, this);
     }
     sketchMenu.add(importMenu);
@@ -682,6 +699,7 @@ public class Editor extends JFrame implements RunnerListener {
     
     if (boardsMenu == null) {
       boardsMenu = new JMenu(_("Board"));
+      MenuScroller.setScrollerFor(boardsMenu);
       base.rebuildBoardsMenu(boardsMenu, this);
     }
     menu.add(boardsMenu);
@@ -692,6 +710,11 @@ public class Editor extends JFrame implements RunnerListener {
       serialMenu = new JMenu(_("Serial Port"));
     populateSerialMenu();
     menu.add(serialMenu);
+
+    for (int i=0; i < customMenu.size(); i++) {
+      populateMenu(i);
+      menu.add(customMenu.get(i));
+    }
     menu.addSeparator();
     
     JMenu programmerMenu = new JMenu(_("Programmer"));
@@ -711,6 +734,14 @@ public class Editor extends JFrame implements RunnerListener {
       public void menuDeselected(MenuEvent e) {}
       public void menuSelected(MenuEvent e) {
         //System.out.println("Tools menu selected.");
+        String name = Base.getBoardPreferences().get("name");
+        if (name != null) {
+          if (name.length() > 24) name = name.substring(0, 23) + "...";
+          boardsMenu.setText("Board: \"" + name + "\"");
+        }
+        for (int i=0; i < customMenu.size(); i++) {
+          populateMenu(i);
+        }
         populateSerialMenu();
       }
     });
@@ -959,6 +990,13 @@ public class Editor extends JFrame implements RunnerListener {
     serialMenu.removeAll();
     boolean empty = true;
 
+    if (Base.getBoardMenuPreference("fake_serial") != null) {
+      serialMenu.setEnabled(false);
+      serialMenu.setText("Serial Port: (emulated)");
+      return;
+    }
+    serialMenu.setText("Serial Port");
+
     try
     {
       for (Enumeration enumeration = CommPortIdentifier.getPortIdentifiers(); enumeration.hasMoreElements();)
@@ -969,7 +1007,9 @@ public class Editor extends JFrame implements RunnerListener {
         {
           //System.out.println("Adding port to serial port menu: " + commportidentifier);
           String curr_port = commportidentifier.getName();
-          rbMenuItem = new JCheckBoxMenuItem(curr_port, curr_port.equals(Preferences.get("serial.port")));
+          boolean selected = curr_port.equals(Preferences.get("serial.port"));
+          rbMenuItem = new JCheckBoxMenuItem(curr_port, selected);
+          if (selected) serialMenu.setText("Serial Port: \"" + curr_port + "\"");
           rbMenuItem.addActionListener(serialMenuListener);
           //serialGroup.add(rbMenuItem);
           serialMenu.add(rbMenuItem);
@@ -997,6 +1037,80 @@ public class Editor extends JFrame implements RunnerListener {
     //serialMenu.add(item);
   }
 
+  protected void populateMenu(int menuIndex) {
+    JMenu menu = customMenu.get(menuIndex);
+    String title = customMenuTitle.get(menuIndex);
+    String menuId = customMenuIdentifier.get(menuIndex);
+    radioButtonMenuListener listner = customMenuListener.get(menuIndex);
+    menu.removeAll();
+    menu.setText(title);
+    String selectedOption = null;
+    //System.out.println("populate menu " + menuId);
+    String selected = Preferences.get("menu." + menuId);
+    for (String pref : Base.getBoardPreferences().keySet()) {
+      String field[] = pref.split("\\.");
+      if (field.length == 4 && field[0].equals("menu") && field[3].equals("name")) {
+       if (field[1].equals(menuId)) {
+          String name = Base.getBoardPreferences().get(pref);
+          if (name != null) {
+            //System.out.println("populateMenu: pref=" + pref + ", name=" + name);
+           boolean checked = (selectedOption == null && field[2].equals(selected));
+            JMenuItem rbMenuItem = new JRadioButtonMenuItem(name, checked);
+            if (checked) selectedOption = name;
+            rbMenuItem.addActionListener(listner);
+            menu.add(rbMenuItem);
+          }
+        }
+      }
+    }
+    if (menu.getItemCount() > 0) {
+      if (selectedOption == null) {
+        ((JRadioButtonMenuItem)menu.getItem(0)).setSelected(true);
+        for (String pref : Base.getBoardPreferences().keySet()) {
+          String field[] = pref.split("\\.");
+          if (field.length == 4 && field[0].equals("menu") && field[3].equals("name")) {
+            if (field[1].equals(menuId)) {
+              Preferences.set("menu." + menuId, field[2]);
+              //System.out.println("Preferences set menu." + menuId + " = " + field[2]);
+              selectedOption = Base.getBoardPreferences().get(pref);
+              break;
+            }
+          }
+        }
+      }
+      if (selectedOption != null) {
+        menu.setText(title + ": \"" + selectedOption + "\"");
+      }
+      menu.setEnabled(true);
+    } else {
+      menu.setEnabled(false);
+    }
+  }
+
+  protected void initializeCustomMenus() {
+    // scan all targets for any custom menus and build a complete list
+    if (customMenusInitialized == false) {
+      //System.out.println("initializeCustomMenus: begin");
+      customMenu = new ArrayList<JMenu>();;
+      customMenuTitle = new ArrayList<String>();
+      customMenuIdentifier = new ArrayList<String>();
+      customMenuListener = new ArrayList<radioButtonMenuListener>();
+      for (Target target : Base.targetsTable.values()) {
+       for (String menu : target.getMenus().keySet()) {
+         String title = target.getMenus().get(menu);
+          if (customMenuIdentifier.contains(menu) == false) {
+            //System.out.println("initializeCustomMenus: add " + menu + "title: " + title);
+            JMenu jmenu = new JMenu(title);
+            customMenu.add(jmenu);
+            customMenuTitle.add(title);
+            customMenuIdentifier.add(menu);
+            customMenuListener.add(new radioButtonMenuListener(jmenu, menu, base));
+          }
+        }
+      }
+      customMenusInitialized = true;
+    }
+  }
 
   protected JMenu buildHelpMenu() {
     // To deal with a Mac OS X 10.5 bug, add an extra space after the name
@@ -1888,7 +2002,7 @@ public class Editor extends JFrame implements RunnerListener {
 
     // Cannot use invokeLater() here, otherwise it gets
     // placed on the event thread and causes a hang--bad idea all around.
-    new Thread(verbose ? presentHandler : runHandler).start();
+     new Thread(verbose ? presentHandler : runHandler).start();
   }
 
   // DAM: in Arduino, this is compile
@@ -2652,7 +2766,14 @@ public class Editor extends JFrame implements RunnerListener {
   protected void onBoardOrPortChange() {
     Map<String, String> boardPreferences =  Base.getBoardPreferences();
     lineStatus.setBoardName(boardPreferences.get("name"));
-    lineStatus.setSerialPort(Preferences.get("serial.port"));
+    if (Base.getBoardMenuPreference("fake_serial") == null) {
+      lineStatus.setSerialPort(Preferences.get("serial.port"));
+    } else {
+      lineStatus.setSerialPort("(USB Port)");
+    }
+    for (int i=0; i < customMenu.size(); i++) {
+      populateMenu(i);
+    }
     lineStatus.repaint();
   }
 
@@ -2800,5 +2921,39 @@ public class Editor extends JFrame implements RunnerListener {
       
       super.show(component, x, y);
     }
+  }
+}
+
+class radioButtonMenuListener implements ActionListener {
+  private JMenu m_menu;
+  private String m_id;
+  private Base m_base;
+
+  public radioButtonMenuListener(JMenu menu, String id, Base b) {
+    m_menu = menu;
+    m_id = id;
+    m_base = b;
+  }
+  public void actionPerformed(ActionEvent e) {
+    if(m_menu == null) return;
+
+    int count = m_menu.getItemCount();
+    for (int i = 0; i < count; i++) {
+      ((JRadioButtonMenuItem)m_menu.getItem(i)).setSelected(false);
+    }
+    JRadioButtonMenuItem item = (JRadioButtonMenuItem)e.getSource();
+    item.setSelected(true);
+    String name = item.getText();
+    for (String pref : Base.getBoardPreferences().keySet()) {
+      String field[] = pref.split("\\.");
+      if (field.length == 4 && field[0].equals("menu") && field[3].equals("name")) {
+       if (field[1].equals(m_id) &&  name.equals(Base.getBoardPreferences().get(pref))) {
+          Preferences.set("menu." + m_id, field[2]);
+          break;
+        }
+      }
+    }
+    m_base.onBoardOrPortChange();
+    Sketch.buildSettingChanged();
   }
 }

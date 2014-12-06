@@ -33,7 +33,7 @@ import java.util.*;
 public class Sizer implements MessageConsumer {
   private String buildPath, sketchName;
   private String firstLine;
-  private long size;
+  private long code_size, data_size;
   private RunnerException exception;
 
   public Sizer(String buildPath, String sketchName) {
@@ -43,29 +43,28 @@ public class Sizer implements MessageConsumer {
   
   public long computeSize() throws RunnerException {
     String avrBasePath = Base.getAvrBasePath();
+    String sizeCommand = Base.getBoardPreferences().get("build.command.objdump");
+    if (sizeCommand == null) sizeCommand = "avr-objdump";
     String commandSize[] = new String[] {
-      avrBasePath + "avr-size",
-      " "
+      avrBasePath + sizeCommand,
+      "-h",
+      buildPath + File.separator + sketchName + ".elf"
     };
-    
-    commandSize[1] = buildPath + File.separator + sketchName + ".hex";
 
-    int r = 0;
     try {
       exception = null;
-      size = -1;
+      code_size = -1;
+      data_size = 0;
       firstLine = null;
       Process process = Runtime.getRuntime().exec(commandSize);
       MessageSiphon in = new MessageSiphon(process.getInputStream(), this);
       MessageSiphon err = new MessageSiphon(process.getErrorStream(), this);
-
       boolean running = true;
-
       while(running) {
         try {
           in.join();
           err.join();
-          r = process.waitFor();
+          process.waitFor();
           running = false;
         } catch (InterruptedException intExc) { }
       }
@@ -74,33 +73,41 @@ public class Sizer implements MessageConsumer {
       // some sub-class has overridden it to do so, thus we need to check for
       // it.  See: http://www.arduino.cc/cgi-bin/yabb2/YaBB.pl?num=1166589459
       exception = new RunnerException(
-        (e.toString() == null) ? e.getClass().getName() + r : e.toString() + r);
+        (e.toString() == null) ? e.getClass().getName() : e.toString());
     }
     
     if (exception != null)
       throw exception;
       
-    if (size == -1)
+    if (code_size == -1)
       throw new RunnerException(firstLine);
       
-    return size;
+    return code_size+1;
   }
-  
+ 
+  public long getDataSize() {
+    return data_size;
+  } 
+
   public void message(String s) {
-    if (firstLine == null)
-      firstLine = s;
-    else {
-      StringTokenizer st = new StringTokenizer(s, " ");
-      try {
-        st.nextToken();
-        st.nextToken();
-        st.nextToken();
-        size = (new Integer(st.nextToken().trim())).longValue();
-      } catch (NoSuchElementException e) {
-        exception = new RunnerException(e.toString());
-      } catch (NumberFormatException e) {
-        exception = new RunnerException(e.toString());
+    if (firstLine == null) firstLine = s;
+    try {
+      String field[] = s.trim().split("\\s+", 4);
+      Integer.parseInt(field[0]);
+      int n = Integer.parseInt(field[2], 16);
+      if (field[1].equals(".text")) {
+          code_size += n;
+          //System.out.println("Sizer (code): " + field[1] + " " + field[2]);
+      } else if (field[1].equals(".data")
+        || field[1].equals(".bss")
+        || field[1].equals(".noinit")
+        || field[1].equals(".usbdescriptortable")
+        || field[1].equals(".usbbuffers")
+        || field[1].equals(".dmabuffers")) {
+          data_size += n;
+          //System.out.println("Sizer (data): " + field[1] + " " + field[2]);
       }
+    } catch (Exception e) {
     }
   }
 }

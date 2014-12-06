@@ -146,6 +146,8 @@ public class Serial implements SerialPortEventListener {
     if (istopbits == 1.5f) stopbits = SerialPort.STOPBITS_1_5;
     if (istopbits == 2) stopbits = SerialPort.STOPBITS_2;
 
+    if (iname == "fake serial") return;
+
     try {
       port = null;
       Enumeration portList = CommPortIdentifier.getPortIdentifiers();
@@ -197,6 +199,13 @@ public class Serial implements SerialPortEventListener {
     }
   }
 
+  public void setBaud(int irate) {
+    if (port != null) {
+      try {
+        port.setSerialPortParams(irate, 8, SerialPort.STOPBITS_1, SerialPort.PARITY_NONE);
+      } catch (Exception e) { }
+    }
+  }
 
   public void setup() {
     //parent.registerCall(this, DISPOSE);
@@ -267,10 +276,10 @@ public class Serial implements SerialPortEventListener {
               buffer = temp;
             }
             //buffer[bufferLast++] = (byte) input.read();
-            if(monitor == true)
-              System.out.print((char) input.read());
-            if (this.consumer != null)
-              this.consumer.message("" + (char) input.read());
+            byte[] tmpbuf = new byte[2048];
+            int tmpcount = input.read(tmpbuf);
+            if (monitor == true) System.out.print(new String(tmpbuf, 0, tmpcount));
+            if (this.consumer != null) this.consumer.message(new String(tmpbuf, 0, tmpcount));
             
             /*
             System.err.println(input.available() + " " + 

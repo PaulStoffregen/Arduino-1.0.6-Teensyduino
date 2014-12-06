@@ -304,18 +304,22 @@ public class AvrdudeUploader extends Uploader  {
   
   public boolean avrdude(Collection params) throws RunnerException {
     List commandDownloader = new ArrayList();
-      
-    if(Base.isLinux()) {
-      if ((new File(Base.getHardwarePath() + "/tools/" + "avrdude")).exists()) {
-        commandDownloader.add(Base.getHardwarePath() + "/tools/" + "avrdude");
-        commandDownloader.add("-C" + Base.getHardwarePath() + "/tools/avrdude.conf");
+    String programName = Base.getBoardPreferences().get("upload.avrdude_wrapper");
+
+    if (programName == null) {
+      if (Base.isLinux()) {
+        if ((new File(Base.getHardwarePath() + "/tools/" + "avrdude")).exists()) {
+          commandDownloader.add(Base.getHardwarePath() + "/tools/" + "avrdude");
+          commandDownloader.add("-C" + Base.getHardwarePath() + "/tools/avrdude.conf");
+        } else {
+          commandDownloader.add("avrdude");
+        }
       } else {
-        commandDownloader.add("avrdude");
+        commandDownloader.add(Base.getHardwarePath() + "/tools/avr/bin/" + "avrdude");
+        commandDownloader.add("-C" + Base.getHardwarePath() + "/tools/avr/etc/avrdude.conf");
       }
-    }
-    else {
-      commandDownloader.add(Base.getHardwarePath() + "/tools/avr/bin/" + "avrdude");
-      commandDownloader.add("-C" + Base.getHardwarePath() + "/tools/avr/etc/avrdude.conf");
+    } else {
+      commandDownloader.add(Base.getHardwarePath() + "/tools/" + programName);
     }
 
     if (verbose || Preferences.getBoolean("upload.verbose")) {

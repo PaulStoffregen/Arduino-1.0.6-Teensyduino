@@ -203,6 +203,7 @@ public class PdePreprocessor {
     
     // print user defined prototypes
     for (int i = 0; i < prototypes.size(); i++) {
+      // TODO: need to emit a #line directive for the line where each function was found
       out.print(prototypes.get(i) + "\n");
     }
     String[] lines = program.substring(0, prototypeInsertionPoint).split("\n", -1);

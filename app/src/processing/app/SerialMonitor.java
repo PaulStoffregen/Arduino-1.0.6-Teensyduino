@@ -28,6 +28,9 @@ import javax.swing.*;
 import javax.swing.border.*;
 import javax.swing.event.*;
 import javax.swing.text.*;
+import java.io.*;
+import java.net.*;
+import java.util.*;
 
 public class SerialMonitor extends JFrame implements MessageConsumer {
   private Serial serial;
@@ -203,8 +206,29 @@ public class SerialMonitor extends JFrame implements MessageConsumer {
   
   public void openSerialPort() throws SerialException {
     if (serial != null) return;
-  
-    serial = new Serial(port, serialRate);
+    if (Base.isTeensyduino() == false) {
+      serial = new Serial(port, serialRate);
+    } else {
+      // only do this weird stuff if we're sure it's teensy!
+      if (Base.getBoardMenuPreferenceBoolean("serial.restart_cmd")) {
+        RestartCommand r = new RestartCommand(port);
+        serial = r.getSerial();
+      }
+      String fake = Base.getBoardMenuPreference("fake_serial");
+      if (fake == null) {
+        if (Base.getBoardMenuPreferenceBoolean("serial.safe_baud_rates_only")) {
+          if (serialRate == 14400) serialRate = 19200;
+          if (serialRate == 28800) serialRate = 38400;
+        }
+        if (serial == null) {
+          serial = new Serial(port, serialRate);
+        } else {
+          serial.setBaud(serialRate);
+        }
+      } else {
+        serial = new FakeSerial(fake);
+      }
+    }
     serial.addListener(this);
   }
   
@@ -228,4 +252,190 @@ public class SerialMonitor extends JFrame implements MessageConsumer {
         }
       }});
   }
+}
+
+class FakeSerial extends Serial {
+       Socket sock=null;
+       inputListener listener=null;
+       int[] addrlist = {28541,4984,18924,16924,27183,31091};
+       static Process gateway=null;
+       static boolean gateway_shutdown_scheduled=false;
+
+       public FakeSerial(String name) throws SerialException {
+               super("fake serial");
+               int attempt=1;
+               do {
+                       if (gateway_connect(name)) return;
+                       if (attempt <= 2 && !gateway_start(name)) {
+                               System.err.println("Error starting " + name);
+                       }
+                       delay_20ms();
+               } while (++attempt < 4);
+               throw new SerialException("no connection");
+       }
+
+        private boolean gateway_connect(String name) {
+                int namelen = name.length();
+                byte[] buf = new byte[namelen];
+                byte[] namebuf = name.getBytes();
+                InetAddress local;
+                try {
+                        byte[] loop = new byte[] {127, 0, 0, 1};
+                        local = InetAddress.getByAddress("localhost", loop);
+                } catch (Exception e) {
+                        sock = null;
+                        return false;
+                }
+                for (int i=0; i<addrlist.length; i++) {
+                        try {
+                                sock = new Socket();
+                                InetSocketAddress addr = new InetSocketAddress(local, addrlist[i]);
+                                sock.connect(addr, 50); // if none, should timeout instantly
+                                                        // but windows will wait up to 1 sec!
+                                input = sock.getInputStream();
+                                output = sock.getOutputStream();
+                        } catch (Exception e) {
+                                sock = null;
+                                return false;
+                        }
+                        // check for welcome message
+                        try {
+                                int wait = 0;
+                                while (input.available() < namelen) {
+                                        if (++wait > 6) throw new Exception();
+                                        delay_20ms();
+                                }
+                                input.read(buf, 0, namelen);
+                                String id = new String(buf, 0, namelen);
+                                for (int n=0; n<namelen; n++) {
+                                        if (buf[n] !=  namebuf[n]) throw new Exception();
+                                }
+                        } catch (Exception e) {
+                                // mistakenly connected to some other program!
+                                close_sock();
+                                continue;
+                        }
+                        return true;
+                }
+                sock = null;
+                return false;
+        }
+
+        private void close_sock() {
+                try {
+                        sock.close();
+                } catch (Exception e) { }
+                sock = null;
+        }
+
+        private void delay_20ms() {
+                try {
+                        Thread.sleep(20);
+                } catch (Exception e) { }
+        }
+
+        public void dispose() {
+                if (listener != null) {
+                        listener.interrupt();
+                        listener.consumer = null;
+                        listener = null;
+                }
+                if (sock != null) {
+                        try {
+                                sock.close();
+                        } catch (Exception e) { }
+                        sock = null;
+                }
+               dispose_gateway();
+        }
+
+       public static void dispose_gateway() {
+               if (gateway != null) {
+                       gateway.destroy();
+                       gateway = null;
+               }
+       }
+
+
+        private boolean gateway_start(String cmd) {
+                String path = Base.getHardwarePath() + "/tools/";
+                try {
+                        gateway = Runtime.getRuntime().exec(path + cmd);
+                       if (!gateway_shutdown_scheduled) {
+                               Runtime.getRuntime().addShutdownHook(new Thread() {
+                                       public void run() {
+                                               FakeSerial.dispose_gateway();
+                                       }
+                               });
+                               gateway_shutdown_scheduled = true;
+                       }
+                } catch (Exception e) {
+                       gateway = null;
+                        return false;
+                }
+                return true;
+        }
+
+       public void addListener(MessageConsumer c) {
+               if (sock == null) return;
+               if (listener != null) listener.interrupt();
+               listener = new inputListener();
+               listener.input = input;
+               listener.consumer = c;
+               listener.start();
+       }
+
+       public void write(byte bytes[]) {
+               if (output == null) return;
+               if (bytes.length > 0) {
+                       try {
+                               output.write(bytes, 0, bytes.length);
+                       } catch (IOException e) { }
+               }
+       }
+       public void setDTR(boolean state) {
+       }
+       static public ArrayList<String> list() {
+               return new ArrayList<String>();
+       }
+}
+
+class RestartCommand {
+       private Process restarter=null;
+       private Serial s=null;
+       public RestartCommand(String port) {
+               if (Base.getBoardMenuPreference("fake_serial") == null) {
+                       try {
+                               s = new Serial(port, 150);
+                       } catch (SerialException e) {
+                               s = null;
+                       }
+               } else {
+                       String path = Base.getHardwarePath() + "/tools/";
+                       try {
+                               restarter = Runtime.getRuntime().exec(path + "teensy_restart");
+                       } catch (Exception e) {
+                       }
+               }
+       }
+       public Serial getSerial() {
+               return s;
+       }
+}
+
+class inputListener extends Thread {
+       MessageConsumer consumer;
+       InputStream input;
+
+       public void run() {
+               byte[] buffer = new byte[1024];
+               int num, errcount=0;
+               try {
+                       while (true) {
+                               num = input.read(buffer);
+                               if (num <= 0) break;
+                               consumer.message(new String(buffer, 0, num));
+                       }
+               } catch (Exception e) { }
+       }
 }

@@ -34,12 +34,14 @@ public class Target {
   private String name;
   private File folder;
   private Map boards;
+  private Map menus;
   private Map programmers;
   
   public Target(String name, File folder) {
     this.name = name;
     this.folder = folder;
     this.boards = new LinkedHashMap();
+    this.menus = new LinkedHashMap();
     this.programmers = new LinkedHashMap();
     
     File boardsFile = new File(folder, "boards.txt");
@@ -50,10 +52,14 @@ public class Target {
         for (Object k : boardPreferences.keySet()) {
           String key = (String) k;
           String board = key.substring(0, key.indexOf('.'));
-          if (!boards.containsKey(board)) boards.put(board, new HashMap());
-          ((Map) boards.get(board)).put(
-            key.substring(key.indexOf('.') + 1),
-            boardPreferences.get(key));
+          if (board.equals("menu")) {
+            menus.put(key.substring(key.indexOf('.') + 1), boardPreferences.get(key));
+          } else {
+            if (!boards.containsKey(board)) boards.put(board, new LinkedHashMap());
+            ((Map) boards.get(board)).put(
+              key.substring(key.indexOf('.') + 1),
+              boardPreferences.get(key));
+          }
         }
       }
     } catch (Exception e) {
@@ -84,6 +90,9 @@ public class Target {
   public File getFolder() { return folder; }
   public Map<String, Map<String, String>> getBoards() {
     return boards;
+  }
+  public Map<String, String> getMenus() {
+    return menus;
   }
   public Map<String, Map<String, String>> getProgrammers() {
     return programmers;

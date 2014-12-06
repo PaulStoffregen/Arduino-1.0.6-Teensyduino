@@ -97,7 +97,11 @@ public class EditorLineStatus extends JComponent {
     if (name=="" && serialport=="") {
       Map<String, String> boardPreferences =  Base.getBoardPreferences();
       setBoardName(boardPreferences.get("name"));
-      setSerialPort(Preferences.get("serial.port"));
+      if (Base.getBoardMenuPreference("fake_serial") == null) {
+        setSerialPort(Preferences.get("serial.port"));
+      } else {
+        setSerialPort("(USB Port)");
+      }
     }
     g.setColor(background);
     Dimension size = getSize();

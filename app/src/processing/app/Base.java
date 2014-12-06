@@ -26,7 +26,7 @@ import java.awt.*;
 import java.awt.event.*;
 import java.io.*;
 import java.util.*;
-
+import java.util.regex.*;
 import javax.swing.*;
 
 import processing.app.debug.Compiler;
@@ -51,6 +51,7 @@ public class Base {
   static String VERSION_NAME = "0106";
   /** Set true if this a proper release rather than a numbered revision. */
   static public boolean RELEASE = false;
+  static String teensyduino_version = null;
 
   static HashMap<Integer, String> platformNames = new HashMap<Integer, String>();
   static {
@@ -132,6 +133,15 @@ public class Base {
     // help 3rd party installers find the correct hardware path
     Preferences.set("last.ide." + VERSION_NAME + ".hardwarepath", getHardwarePath());
     Preferences.set("last.ide." + VERSION_NAME + ".daterun", "" + (new Date()).getTime() / 1000);
+
+    try {
+      File versionFile = getContentFile("lib/teensyduino.txt");
+      if (versionFile.exists()) {
+        teensyduino_version = PApplet.loadStrings(versionFile)[0];
+      }
+    } catch (Exception e) {
+      teensyduino_version = null;
+    }
 
 //    if (System.getProperty("mrj.version") != null) {
 //      //String jv = System.getProperty("java.version");
@@ -278,9 +288,148 @@ public class Base {
       }
     }
     
-    targetsTable = new HashMap<String, Target>();
+    targetsTable = new LinkedHashMap<String, Target>();
     loadHardware(getHardwareFolder());
     loadHardware(getSketchbookHardwareFolder());
+
+    // allow command line usage - adapted from Arduino 1.5.x branch
+    boolean fileOpened = false;
+    boolean doUpload = false;
+    boolean doVerify = false;
+    boolean doVerbose = false;
+    String selectBoard = null;
+    String selectPort = null;
+    String selectUsbType = null;
+    String selectSpeed = null;
+    // Check if any files were passed in on the command line
+    for (int i = 0; i < args.length; i++) {
+      if (args[i].equals("--upload")) {
+        doUpload = true;
+        continue;
+      }
+      if (args[i].equals("--verify")) {
+        doVerify = true;
+        continue;
+      }
+      if (args[i].equals("--verbose") || args[i].equals("-v")) {
+        doVerbose = true;
+        continue;
+      }
+      if (args[i].equals("--board")) {
+        i++;
+        if (i < args.length)
+          selectBoard = args[i];
+        continue;
+      }
+      if (args[i].equals("--port")) {
+        i++;
+        if (i < args.length)
+          selectPort = args[i];
+        continue;
+      }
+      if (args[i].equals("--usbtype")) {
+        i++;
+        if (i < args.length)
+          selectUsbType = args[i];
+        continue;
+      }
+      if (args[i].equals("--speed")) {
+        i++;
+        if (i < args.length)
+          selectSpeed = args[i];
+        continue;
+      }
+      String path = args[i];
+      // Fix a problem with systems that use a non-ASCII languages. Paths are
+      // being passed in with 8.3 syntax, which makes the sketch loader code
+      // unhappy, since the sketch folder naming doesn't match up correctly.
+      // http://dev.processing.org/bugs/show_bug.cgi?id=1089
+      if (isWindows()) {
+        try {
+          File file = new File(args[i]);
+          path = file.getCanonicalPath();
+        } catch (IOException e) {
+          e.printStackTrace();
+        }
+      }
+      if (handleOpen(path) != null) {
+        fileOpened = true;
+      }
+    }
+
+    if (doUpload || doVerify) {
+      if (!fileOpened) {
+        System.out.println(_("Can't open source sketch!"));
+        System.exit(2);
+      }
+      //try {
+        // this was necessary before adding the 2 checks for
+        // (progressBar == null) in EditorStatus.java
+        //Thread.sleep(250);
+      //} catch (Exception e) { }
+
+      // Set verbosity for command line build
+      Preferences.set("build.verbose", "" + doVerbose);
+      Preferences.set("upload.verbose", "" + doVerbose);
+
+      // Do board selection if requested
+      Editor editor = editors.get(0);
+      if (selectBoard == null) {
+        System.out.println("No board selected");
+        System.exit(3);
+      }
+      String[] split = selectBoard.split(":");
+      if (split.length != 3) {
+        System.out.println("error in board parameter, format is platform:arch:board");
+        System.exit(3);
+      }
+      // TODO: check if target exists
+      Preferences.set("target", split[0]);
+      // "arch" is not used on Arduino 1.0.x
+      // TODO: check if board exists within target
+      Preferences.set("board", split[2]);
+
+      if (selectUsbType != null) {
+        Preferences.set("menu.usb", selectUsbType);
+      }
+      if (selectSpeed != null) {
+        Preferences.set("menu.speed", selectSpeed);
+      }
+
+      onBoardOrPortChange();
+      Sketch.buildSettingChanged();
+      //System.out.println("selected board is " + getBoardPreferences().get("name"));
+
+      Thread buildProcess;
+      if (doUpload) {
+        // Build and upload
+        if (selectPort != null) {
+          editor.selectSerialPort(selectPort);
+          onBoardOrPortChange();
+        }
+        buildProcess = new Thread(editor.exportHandler);
+      } else {
+        // Build only
+        System.out.println("run verify....");
+        //Thread t = editor.handleRun(doVerbose);
+        if (doVerbose) {
+          buildProcess = new Thread(editor.presentHandler);
+        } else {
+          buildProcess = new Thread(editor.runHandler);
+        }
+      }
+
+      // actually run the build process and wait for it to complete
+      buildProcess.run();
+
+      // Error during build or upload
+      int res = editor.status.mode;
+      if (res == EditorStatus.ERR)
+        System.exit(1);
+
+      // No errors exit gracefully
+      System.exit(0);
+    }
 
     // Check if there were previously opened sketches to be restored
     boolean opened = restoreSketches();
@@ -746,7 +895,6 @@ public class Base {
     editor.setVisible(true);
 
 //    System.err.println("exiting handleOpen");
-
     return editor;
   }
 
@@ -797,9 +945,9 @@ public class Base {
       }
 
       // This will store the sketch count as zero
-      editors.remove(editor);
       Editor.serialMonitor.closeSerialPort();
       storeSketches();
+      editors.remove(editor);
 
       // Save out the current prefs state
       Preferences.save();
@@ -1277,7 +1425,15 @@ public class Base {
 
     // alphabetize list, since it's not always alpha order
     // replaced hella slow bubble sort with this feller for 0093
-    Arrays.sort(list, String.CASE_INSENSITIVE_ORDER);
+    Arrays.sort(list, new Comparator<String>() {
+      public int compare(String s1, String s2) {
+        int i = s1.compareToIgnoreCase(s2);
+        if (i == 0) return 0;
+        if (s1.equalsIgnoreCase("teensy")) return -1;
+        if (s2.equalsIgnoreCase("teensy")) return 1;
+        return i;
+      }
+    });
     
     for (String target : list) {
       File subfolder = new File(folder, target);
@@ -1302,9 +1458,16 @@ public class Base {
           g2.setRenderingHint(RenderingHints.KEY_TEXT_ANTIALIASING,
                               RenderingHints.VALUE_TEXT_ANTIALIAS_OFF);
 
-          g.setFont(new Font("SansSerif", Font.PLAIN, 11));
+          Font f = new Font("SansSerif", Font.PLAIN, 11);
+          g.setFont(f);
           g.setColor(Color.white);
           g.drawString(Base.VERSION_NAME, 50, 30);
+          if (Base.teensyduino_version != null) {
+            FontMetrics m = g.getFontMetrics(f);
+            g.drawString("Teensyduino", 285 - m.stringWidth("Teensyduino") / 2, 44);
+            g.drawString(Base.teensyduino_version,
+              285 - m.stringWidth(Base.teensyduino_version) / 2, 60);
+          }
         }
       };
     window.addMouseListener(new MouseAdapter() {
@@ -1551,9 +1714,12 @@ public class Base {
   
   
   static public String getAvrBasePath() {
+    String arch = getBoardPreferences().get("build.architecture");
+    if (arch == null) arch = "avr";
+    //System.out.println("build.architecture = " + arch);
     String path = getHardwarePath() + File.separator + "tools" +
-                  File.separator + "avr" + File.separator + "bin" + File.separator;
-    if (Base.isLinux() && !(new File(path)).exists()) {
+                  File.separator + arch + File.separator + "bin" + File.separator;
+    if (!(new File(path)).exists()) {
       return "";  // use distribution provided avr tools if bundled tools missing
     }
     return path;
@@ -1575,6 +1741,53 @@ public class Base {
     return map;
   }
   
+  static public String getBoardMenuPreference(String key) {
+    Map<String,String> map = getBoardPreferences();
+    //System.out.println("***************************");
+    //System.out.println("getBoardMenuPreference: key = " + key);
+    for (String pref : map.keySet()) {
+      //System.out.println("getBoardMenuPreference: pref " + pref);
+      if (getBoardMenuMatch(pref, key)) return map.get(pref);
+    }
+    //System.out.println("getBoardMenuPreference: not found");
+    return null;
+  }
+
+  static public boolean getBoardMenuPreferenceBoolean(String key) {
+   return (new Boolean(getBoardMenuPreference(key))).booleanValue();
+  }
+
+  static public boolean isTeensyduino() {
+    String t = Preferences.get("target");
+    String b = Preferences.get("board");
+    if (t == null || b == null) return false;
+    if (t.compareTo("teensy") != 0) return false;
+    if (b.startsWith("teensy") == false) return false;
+    return true;
+  }
+
+  static private boolean getBoardMenuMatch(String pref, String key) {
+    String field[] = pref.split("\\.");
+    int index = 0;
+    while (field.length - index > 3 && field[index].equals("menu")) {
+      String val = Preferences.get("menu." + field[index + 1]);
+      if (val == null) return false;
+      //System.out.println("getBoardMenuMatch, menu." + field[index + 1] + " = " + val);
+      if (!field[index + 2].equals(val)) return false;
+      //System.out.println("getBoardMenuMatch, menu match");
+      index += 3;
+    }
+    if (key == null) return false;
+    String keys[] = key.split("\\.");
+    //System.out.println("getBoardMenuMatch, key=" + key + ", fields: " + keys.length);
+    if (keys.length != field.length - index) return false;
+    for (int i=0; i < keys.length; i++) {
+      if (!keys[i].equals(field[i + index])) return false;
+    }
+    //System.out.println("getBoardMenuMatch, success");
+    return true;
+  }
+
 
   static public File getSketchbookFolder() {
     return new File(Preferences.get("sketchbook.path"));
