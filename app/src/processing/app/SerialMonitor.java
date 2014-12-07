@@ -19,6 +19,7 @@
 package processing.app;
 
 import processing.app.debug.MessageConsumer;
+import processing.app.debug.TextAreaFIFO;
 import processing.core.*;
 import static processing.app.I18n._;
 
@@ -32,10 +33,10 @@ import java.io.*;
 import java.net.*;
 import java.util.*;
 
-public class SerialMonitor extends JFrame implements MessageConsumer {
+public class SerialMonitor extends JFrame implements MessageConsumer,ActionListener {
   private Serial serial;
   private String port;
-  private JTextArea textArea;
+  private TextAreaFIFO textArea;
   private JScrollPane scrollPane;
   private JTextField textField;
   private JButton sendButton;
@@ -43,6 +44,8 @@ public class SerialMonitor extends JFrame implements MessageConsumer {
   private JComboBox lineEndings;
   private JComboBox serialRates;
   private int serialRate;
+  private javax.swing.Timer updateTimer;
+  private StringBuffer updateBuffer;
 
   public SerialMonitor(String port) {
     super(port);
@@ -70,7 +73,9 @@ public class SerialMonitor extends JFrame implements MessageConsumer {
     Font editorFont = Preferences.getFont("editor.font");
     Font font = new Font(consoleFont.getName(), consoleFont.getStyle(), editorFont.getSize());
 
-    textArea = new JTextArea(16, 40);
+    textArea = new TextAreaFIFO(4000000);
+    textArea.setRows(16);
+    textArea.setColumns(40);
     textArea.setEditable(false);    
     textArea.setFont(font);
     
@@ -174,6 +179,9 @@ public class SerialMonitor extends JFrame implements MessageConsumer {
         }
       }
     }
+
+    updateBuffer = new StringBuffer(1048576);
+    updateTimer = new javax.swing.Timer(33, this);  // redraw serial monitor at 30 Hz
   }
   
   protected void setPlacement(int[] location) {
@@ -230,6 +238,7 @@ public class SerialMonitor extends JFrame implements MessageConsumer {
       }
     }
     serial.addListener(this);
+    updateTimer.start();
   }
   
   public void closeSerialPort() {
@@ -243,15 +252,34 @@ public class SerialMonitor extends JFrame implements MessageConsumer {
     }
   }
   
-  public void message(final String s) {
-    SwingUtilities.invokeLater(new Runnable() {
-      public void run() {
-        textArea.append(s);
-        if (autoscrollBox.isSelected()) {
-        	textArea.setCaretPosition(textArea.getDocument().getLength());
-        }
-      }});
+  public void message(String s) {
+    // TODO: can we pass a byte array, to avoid overhead of String
+    addToUpdateBuffer(s);
   }
+
+  private synchronized void addToUpdateBuffer(String s) {
+    updateBuffer.append(s);
+  }
+
+  private synchronized String consumeUpdateBuffer() {
+    String s = updateBuffer.toString();
+    updateBuffer.setLength(0);
+    return s;
+  }
+
+  public void actionPerformed(ActionEvent e) {
+    final String s = consumeUpdateBuffer();
+    if (s.length() > 0) {
+      //System.out.println("gui append " + s.length());
+      boolean scroll = autoscrollBox.isSelected();
+      textArea.allowTrim(scroll);
+      textArea.append(s);
+      if (scroll) {
+        textArea.setCaretPosition(textArea.getDocument().getLength());
+      }
+    }
+  }
+
 }
 
 class FakeSerial extends Serial {
