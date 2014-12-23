@@ -47,6 +47,7 @@ public class SerialMonitor extends JFrame implements MessageConsumerBytes,Action
   private int serialRate;
   private javax.swing.Timer updateTimer;
   private StringBuffer updateBuffer;
+  private int extraUnscrollCount;  // # of chars added while not scrolling
 
   public SerialMonitor(String port) {
     super(port);
@@ -181,6 +182,7 @@ public class SerialMonitor extends JFrame implements MessageConsumerBytes,Action
       }
     }
 
+    extraUnscrollCount = 0;
     updateBuffer = new StringBuffer(1048576);
     updateTimer = new javax.swing.Timer(33, this);  // redraw serial monitor at 30 Hz
   }
@@ -274,9 +276,22 @@ public class SerialMonitor extends JFrame implements MessageConsumerBytes,Action
 
   public void actionPerformed(ActionEvent e) {
     final String s = consumeUpdateBuffer();
-    if (s.length() > 0) {
-      //System.out.println("gui append " + s.length());
+    int len = s.length();
+    if (len > 0) {
       boolean scroll = autoscrollBox.isSelected();
+      if (scroll) {
+        // when scrolling, always add incoming data to the document
+        // TextAreaFIFO will automatically trim the oldest data
+        extraUnscrollCount = 0;
+      } else {
+        // when auto-scroll is off, limit how much data we add,
+        // because TextAreaFIFO can't trim the document (doing so
+        // would cause the display to jump while the user is trying
+        // to read)
+        extraUnscrollCount += len;
+        if (extraUnscrollCount > 6000000) return;
+      }
+      //System.out.println("gui append " + s.length());
       textArea.allowTrim(scroll);
       textArea.append(s);
       if (scroll) {
