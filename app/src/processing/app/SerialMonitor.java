@@ -48,6 +48,7 @@ public class SerialMonitor extends JFrame implements MessageConsumerBytes,Action
   private javax.swing.Timer updateTimer;
   private StringBuffer updateBuffer;
   private int extraUnscrollCount;  // # of chars added while not scrolling
+  private Thread reopener;
 
   public SerialMonitor(String port) {
     super(port);
@@ -182,6 +183,7 @@ public class SerialMonitor extends JFrame implements MessageConsumerBytes,Action
       }
     }
 
+    reopener = null;
     extraUnscrollCount = 0;
     updateBuffer = new StringBuffer(1048576);
     updateTimer = new javax.swing.Timer(33, this);  // redraw serial monitor at 30 Hz
@@ -215,7 +217,7 @@ public class SerialMonitor extends JFrame implements MessageConsumerBytes,Action
     }
   }
   
-  public void openSerialPort() throws SerialException {
+  public synchronized void openSerialPort() throws SerialException {
     if (serial != null) return;
     if (Base.isTeensyduino() == false) {
       serial = new Serial(port, serialRate);
@@ -244,7 +246,7 @@ public class SerialMonitor extends JFrame implements MessageConsumerBytes,Action
     updateTimer.start();
   }
   
-  public void closeSerialPort() {
+  public synchronized void closeSerialPort() {
     if (serial != null) {
       int[] location = getPlacement();
       String locationStr = PApplet.join(PApplet.str(location), ",");
@@ -254,7 +256,65 @@ public class SerialMonitor extends JFrame implements MessageConsumerBytes,Action
       serial = null;
     }
   }
-  
+
+  public void enableWindow(boolean enable) {
+    textArea.setEnabled(enable);
+    scrollPane.setEnabled(enable);
+    textField.setEnabled(enable);
+    sendButton.setEnabled(enable);
+    autoscrollBox.setEnabled(enable);
+    lineEndings.setEnabled(enable);
+    serialRates.setEnabled(enable);
+  }
+
+  public void open() throws SerialException {
+    if (reopener != null && reopener.isAlive()) reopener.interrupt();
+    enableWindow(true);
+    openSerialPort();
+  }
+
+  public void reopen() {
+    if (!isVisible()) return;
+    if (serial != null) return;
+    if (reopener != null && reopener.isAlive()) return;
+
+    reopener = new Thread() {
+      public void run() {
+        //System.out.println("reopen thread begin");
+        int attempt = 0;
+        while (attempt++ < 30) {  // keep trying for approx 10 seconds
+          try {
+            sleep(330);
+          } catch (InterruptedException e) {
+            //System.out.println("reopen interrupted");
+            return;
+          }
+          try {
+            openSerialPort();
+            if (serial != null) {
+              //System.out.println("reopen opened ok");
+              enableWindow(true);
+              return;
+            }
+          } catch (SerialException e) {
+          }
+          //System.out.println("reopen, attempt " + attempt);
+        }
+        //System.out.println("reopen timeout");
+      }
+    };
+    reopener.start();
+  }
+
+  public void close() {
+    if (reopener != null && reopener.isAlive()) reopener.interrupt();
+    closeSerialPort();
+    if (Base.isTeensyduino())
+      enableWindow(false);
+    else
+      setVisible(false);
+  }
+
   public void message(String s) {
     addToUpdateBuffer(s);
   }

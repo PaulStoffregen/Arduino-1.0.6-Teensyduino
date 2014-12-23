@@ -2488,8 +2488,7 @@ public class Editor extends JFrame implements RunnerListener {
     public void run() {
 
       try {
-        serialMonitor.closeSerialPort();
-        serialMonitor.setVisible(false);
+        serialMonitor.close();
             
         uploading = true;
           
@@ -2516,6 +2515,8 @@ public class Editor extends JFrame implements RunnerListener {
       uploading = false;
       //toolbar.clear();
       toolbar.deactivate(EditorToolbar.EXPORT);
+
+      serialMonitor.reopen();
     }
   }
 
@@ -2524,8 +2525,7 @@ public class Editor extends JFrame implements RunnerListener {
     public void run() {
 
       try {
-        serialMonitor.closeSerialPort();
-        serialMonitor.setVisible(false);
+        serialMonitor.close();
             
         uploading = true;
           
@@ -2552,6 +2552,8 @@ public class Editor extends JFrame implements RunnerListener {
       uploading = false;
       //toolbar.clear();
       toolbar.deactivate(EditorToolbar.EXPORT);
+
+      serialMonitor.reopen();
     }
   }
 
@@ -2594,7 +2596,7 @@ public class Editor extends JFrame implements RunnerListener {
     if (uploading) return;
     
     try {
-      serialMonitor.openSerialPort();
+      serialMonitor.open();
       serialMonitor.setVisible(true);
     } catch (SerialException e) {
       statusError(e);
