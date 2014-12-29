@@ -268,7 +268,7 @@ public class SerialMonitor extends JFrame implements MessageConsumerBytes,Action
   }
 
   public void open() throws SerialException {
-    if (reopener != null && reopener.isAlive()) reopener.interrupt();
+    if (reopener != null && reopener.isAlive()) reopen_abort();
     enableWindow(true);
     openSerialPort();
   }
@@ -306,8 +306,22 @@ public class SerialMonitor extends JFrame implements MessageConsumerBytes,Action
     reopener.start();
   }
 
+  private boolean reopen_abort() {
+    Thread t = reopener;
+    t.interrupt();
+    int attempt = 0;
+    while (attempt++ < 25) {  // keep trying for approx 1/4 second
+      if (!t.isAlive()) return true;
+      try {
+        Thread.sleep(10);
+      } catch (InterruptedException e) {
+      }
+    }
+    return false;
+  }
+
   public void close() {
-    if (reopener != null && reopener.isAlive()) reopener.interrupt();
+    if (reopener != null && reopener.isAlive()) reopen_abort();
     closeSerialPort();
     if (Base.isTeensyduino())
       enableWindow(false);
