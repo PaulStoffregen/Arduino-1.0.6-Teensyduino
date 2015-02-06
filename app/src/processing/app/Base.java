@@ -1376,23 +1376,33 @@ public class Base {
       try {
         String headers[] = Compiler.headerListFromIncludePath(libFolderPath);
         for (String header : headers) {
-          // Extract file name (without extension ".h")
-          String name = header.substring(0, header.length() - 2);
 
-          // If the header name equals to the current library folder use it
-          if (libFolderPath.endsWith(name)) {
-            importToLibraryTable.put(header, libFolder);
-            continue;
-          }
-
-          // If a library was already found with this header, keep it if
-          // the library's directory name matches the header name.
           File old = importToLibraryTable.get(header);
-          if (old != null) {
-            if (old.getPath().endsWith(name))
-              continue;
+          if (old == null) {
+            // found a header file not on the list
+            //System.out.println("library " + libFolder + " for header " + header);
+            importToLibraryTable.put(header, libFolder);
+          } else {
+            // found a header file already on the list,
+            // so we must decide whether to use the library already
+            // found, or use this library when this header is #include
+            String name = header.substring(0, header.length() - 2); // header without ".h"
+            //System.out.println("Duplicate " + header);
+            //System.out.println("  prev: " + old.getPath() + "   " + old.getName());
+            //System.out.println("  new:  " + libFolder.getPath() + "   " + libFolder.getName());
+            if (name.equalsIgnoreCase(libFolder.getName()) || name.startsWith(libFolder.getName())) {
+              // header name clearly matches this new library, so use it
+              //System.out.println("  use:  " + libFolder.getPath());
+              importToLibraryTable.put(header, libFolder);
+            } else if (name.equalsIgnoreCase(old.getName()) || name.startsWith(old.getName())) {
+              // header name clearly matches the previously found library, so keep it
+              //System.out.println("  use:  " + old.getPath());
+	    } else {
+              // neither is a good match, so go with the last one found
+              //System.out.println("  use:  " + libFolder.getPath());
+              importToLibraryTable.put(header, libFolder);
+	    }
           }
-          importToLibraryTable.put(header, libFolder);
         }
       } catch (IOException e) {
         showWarning(_("Error"), I18n.format(
