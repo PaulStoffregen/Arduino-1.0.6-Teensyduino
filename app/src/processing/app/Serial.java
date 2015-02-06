@@ -25,7 +25,7 @@
 package processing.app;
 //import processing.core.*;
 
-import processing.app.debug.MessageConsumerBytes;
+import processing.app.debug.MessageConsumer;
 import static processing.app.I18n._;
 
 import gnu.io.*;
@@ -62,7 +62,7 @@ public class Serial implements SerialPortEventListener {
   int bufferIndex;
   int bufferLast;
   
-  MessageConsumerBytes consumer;
+  MessageConsumer consumer;
 
   public Serial(boolean monitor) throws SerialException {
     this(Preferences.get("serial.port"),
@@ -244,7 +244,7 @@ public class Serial implements SerialPortEventListener {
   }
   
   
-  public void addListener(MessageConsumerBytes consumer) {
+  public void addListener(MessageConsumer consumer) {
     this.consumer = consumer;
   }
 

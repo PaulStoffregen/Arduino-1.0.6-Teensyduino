@@ -19,7 +19,6 @@
 package processing.app;
 
 import processing.app.debug.MessageConsumer;
-import processing.app.debug.MessageConsumerBytes;
 import processing.app.debug.TextAreaFIFO;
 import processing.core.*;
 import static processing.app.I18n._;
@@ -34,7 +33,7 @@ import java.io.*;
 import java.net.*;
 import java.util.*;
 
-public class SerialMonitor extends JFrame implements MessageConsumerBytes,ActionListener {
+public class SerialMonitor extends JFrame implements MessageConsumer,ActionListener {
   private Serial serial;
   private String port;
   private TextAreaFIFO textArea;
@@ -325,15 +324,6 @@ public class SerialMonitor extends JFrame implements MessageConsumerBytes,Action
   }
 
   public void message(String s) {
-    addToUpdateBuffer(s);
-  }
-
-  public void messageBytes(byte[] data, int length) {
-    // TODO: does this really save much CPU time?
-    //addToUpdateBuffer("in\n");
-  }
-
-  private void addToUpdateBuffer(String s) {
     synchronized (updateBuffer) {
       updateBuffer.append(s);
     }
