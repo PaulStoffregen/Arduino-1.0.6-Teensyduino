@@ -230,16 +230,13 @@ public class Serial implements SerialPortEventListener {
       // do io streams need to be closed first?
       if (input != null) input.close();
       if (output != null) output.close();
-
     } catch (Exception e) {
       e.printStackTrace();
     }
     input = null;
     output = null;
-
     try {
       if (port != null) port.close();  // close the port
-
     } catch (Exception e) {
       e.printStackTrace();
     }
@@ -252,7 +249,7 @@ public class Serial implements SerialPortEventListener {
   }
 
 
-  synchronized public void serialEvent(SerialPortEvent serialEvent) {
+  public void serialEvent(SerialPortEvent serialEvent) {
     //System.out.println("serial port event"); // " + serialEvent);
     //System.out.flush();
     //System.out.println("into");
@@ -270,12 +267,12 @@ public class Serial implements SerialPortEventListener {
           //serialEvent();
           //buffer[bufferCount++] = (byte) serial;
           synchronized (buffer) {
+            if (input == null) break;
             if (bufferLast == buffer.length) {
               byte temp[] = new byte[bufferLast << 1];
               System.arraycopy(buffer, 0, temp, 0, bufferLast);
               buffer = temp;
             }
-            //buffer[bufferLast++] = (byte) input.read();
             byte[] tmpbuf = new byte[4096];
             int tmpcount = input.read(tmpbuf);
             if (monitor == true) System.out.print(new String(tmpbuf, 0, tmpcount));

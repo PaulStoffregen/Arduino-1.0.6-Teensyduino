@@ -217,7 +217,7 @@ public class SerialMonitor extends JFrame implements MessageConsumerBytes,Action
     }
   }
   
-  public synchronized void openSerialPort() throws SerialException {
+  public void openSerialPort() throws SerialException {
     if (serial != null) return;
     if (Base.isTeensyduino() == false) {
       serial = new Serial(port, serialRate);
@@ -246,7 +246,7 @@ public class SerialMonitor extends JFrame implements MessageConsumerBytes,Action
     updateTimer.start();
   }
   
-  public synchronized void closeSerialPort() {
+  public void closeSerialPort() {
     if (serial != null) {
       int[] location = getPlacement();
       String locationStr = PApplet.join(PApplet.str(location), ",");
@@ -280,27 +280,22 @@ public class SerialMonitor extends JFrame implements MessageConsumerBytes,Action
 
     reopener = new Thread() {
       public void run() {
-        //System.out.println("reopen thread begin");
         int attempt = 0;
         while (attempt++ < 30) {  // keep trying for approx 10 seconds
           try {
             sleep(330);
           } catch (InterruptedException e) {
-            //System.out.println("reopen interrupted");
             return;
           }
           try {
             openSerialPort();
             if (serial != null) {
-              //System.out.println("reopen opened ok");
               enableWindow(true);
               return;
             }
           } catch (SerialException e) {
           }
-          //System.out.println("reopen, attempt " + attempt);
         }
-        //System.out.println("reopen timeout");
       }
     };
     reopener.start();
@@ -338,13 +333,18 @@ public class SerialMonitor extends JFrame implements MessageConsumerBytes,Action
     //addToUpdateBuffer("in\n");
   }
 
-  private synchronized void addToUpdateBuffer(String s) {
-    updateBuffer.append(s);
+  private void addToUpdateBuffer(String s) {
+    synchronized (updateBuffer) {
+      updateBuffer.append(s);
+    }
   }
 
-  private synchronized String consumeUpdateBuffer() {
-    String s = updateBuffer.toString();
-    updateBuffer.setLength(0);
+  private String consumeUpdateBuffer() {
+    String s;
+    synchronized (updateBuffer) {
+      s = updateBuffer.toString();
+      updateBuffer.setLength(0);
+    }
     return s;
   }
 
