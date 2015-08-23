@@ -88,7 +88,7 @@ public class Base {
   static HashSet<File> libraries;
   
   // maps imported packages to their library folder
-  static HashMap<String, File> importToLibraryTable;
+  static HashMap<String, LinkedList<File>> importToLibraryTable;
 
   // classpath for all known libraries for p5
   // (both those in the p5/libs folder and those with lib subfolders
@@ -1117,7 +1117,7 @@ public class Base {
     libraries = new HashSet<File>();
 
     // reset the table mapping imports to libraries
-    importToLibraryTable = new HashMap<String, File>();
+    importToLibraryTable = new HashMap<String, LinkedList<File>>();
 
     // Add from the "libraries" subfolder in the Processing directory
     try {
@@ -1377,12 +1377,16 @@ public class Base {
         String headers[] = Compiler.headerListFromIncludePath(libFolderPath);
         for (String header : headers) {
 
-          File old = importToLibraryTable.get(header);
-          if (old == null) {
+          LinkedList<File> liblist = importToLibraryTable.get(header);
+          if (liblist == null) {
             // found a header file not on the list
             //System.out.println("library " + libFolder + " for header " + header);
-            importToLibraryTable.put(header, libFolder);
+            liblist = new LinkedList<File>();
+            liblist.addFirst(libFolder);
+            importToLibraryTable.put(header, liblist);
           } else {
+            File old = liblist.peekFirst();
+            boolean useThisLib = false;
             // found a header file already on the list,
             // so we must decide whether to use the library already
             // found, or use this library when this header is #include
@@ -1393,15 +1397,20 @@ public class Base {
             if (name.equalsIgnoreCase(libFolder.getName()) || name.startsWith(libFolder.getName())) {
               // header name clearly matches this new library, so use it
               //System.out.println("  use:  " + libFolder.getPath());
-              importToLibraryTable.put(header, libFolder);
+              useThisLib = true;
             } else if (name.equalsIgnoreCase(old.getName()) || name.startsWith(old.getName())) {
               // header name clearly matches the previously found library, so keep it
               //System.out.println("  use:  " + old.getPath());
 	    } else {
               // neither is a good match, so go with the last one found
               //System.out.println("  use:  " + libFolder.getPath());
-              importToLibraryTable.put(header, libFolder);
+              useThisLib = true;
 	    }
+            if (useThisLib) {
+              liblist.addFirst(libFolder);
+            } else {
+              liblist.addLast(libFolder);
+            }
           }
         }
       } catch (IOException e) {

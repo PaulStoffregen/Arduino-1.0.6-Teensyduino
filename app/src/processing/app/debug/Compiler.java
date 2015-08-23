@@ -343,8 +343,10 @@ public class Compiler implements MessageConsumer {
       commandScript.add("-file=" + primaryClassName);
       execTeensySimple(commandScript);
     }
+    sketch.adviseDuplicateLibraries();
     return true;
   }
+
 
   private List<File> recursiveCompile(String avrBasePath, File srcFolder,
       File outputFolder, List<File> includePaths,

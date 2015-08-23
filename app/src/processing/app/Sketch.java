@@ -96,6 +96,8 @@ public class Sketch {
    * List of library folders. 
    */
   private ArrayList<File> importedLibraries;
+  private ArrayList<String> importedDuplicateHeaders;
+  private ArrayList<LinkedList<File>> importedDuplicateLibraries;
 
   /**
    * path is location of the main .pde file, because this is also
@@ -1436,14 +1438,20 @@ public class Sketch {
     // grab the imports from the code just preproc'd
 
     importedLibraries = new ArrayList<File>();
+    importedDuplicateHeaders = new ArrayList<String>();
+    importedDuplicateLibraries = new ArrayList<LinkedList<File>>();
 
     for (String item : preprocessor.getExtraImports()) {
-      File libFolder = (File) Base.importToLibraryTable.get(item);
-
-      if (libFolder != null && !importedLibraries.contains(libFolder)) {
-        importedLibraries.add(libFolder);
-        //classPath += Compiler.contentsToClassPath(libFolder);
-        libraryPath += File.pathSeparator + libFolder.getAbsolutePath();
+      LinkedList<File> liblist = Base.importToLibraryTable.get(item);
+      if (liblist != null) {
+        File libFolder = liblist.peekFirst();
+        if (libFolder != null && !importedLibraries.contains(libFolder)) {
+          importedLibraries.add(libFolder);
+          if (liblist.size() > 1) {
+            importedDuplicateHeaders.add(item);
+            importedDuplicateLibraries.add(liblist);
+          }
+        }
       }
     }
 
@@ -1582,14 +1590,38 @@ public class Sketch {
     // compile the program. errors will happen as a RunnerException
     // that will bubble up to whomever called build().
     Compiler compiler = new Compiler();
-    if (compiler.compile(this, buildPath, primaryClassName, verbose)) {
-      size(buildPath, primaryClassName);
-      return primaryClassName;
+    try {
+      if (compiler.compile(this, buildPath, primaryClassName, verbose)) {
+        size(buildPath, primaryClassName);
+        return primaryClassName;
+      }
+    } catch (RunnerException e) {
+      // when the compile fails, take this opportunity to show
+      // any helpful info possible before throwing the exception
+      adviseDuplicateLibraries();
+      throw e;
     }
     return null;
   }
   
   
+  public void adviseDuplicateLibraries() {
+    for (int i=0; i < importedDuplicateHeaders.size(); i++) {
+      System.out.println(I18n.format(_("Multiple libraries were found for \"{0}\""),
+        importedDuplicateHeaders.get(i)));
+      boolean first = true;
+      for (File libFolder : importedDuplicateLibraries.get(i)) {
+        if (first) {
+          System.out.println(I18n.format(_(" Used: {0}"), libFolder.getPath()));
+          first = false;
+        } else {
+          System.out.println(I18n.format(_(" Not Used: {0}"), libFolder.getPath()));
+        }
+      }
+    }
+  }
+
+
   protected boolean exportApplet(boolean usingProgrammer) throws Exception {
     return exportApplet(tempBuildFolder.getAbsolutePath(), usingProgrammer);
   }
