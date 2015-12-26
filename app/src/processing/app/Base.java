@@ -1245,11 +1245,13 @@ public class Base {
     ActionListener listener = new ActionListener() {
         public void actionPerformed(ActionEvent e) {
           String path = e.getActionCommand();
-          if (new File(path).exists()) {
+          File file = new File(path);
+          if (file.exists()) {
             boolean replace = replaceExisting;
             if ((e.getModifiers() & ActionEvent.SHIFT_MASK) != 0) {
               replace = !replace;
             }
+            Sketch.warnExampleDuplicateLibrary(file);
             if (replace) {
               handleOpenReplace(path);
             } else {

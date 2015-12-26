@@ -1621,6 +1621,40 @@ public class Sketch {
     }
   }
 
+  static public void warnExampleDuplicateLibrary(File file) {
+    if (!Base.isTeensyduino()) return;
+    //System.out.println("warnExampleDuplicateLibrary " + file.getPath());
+    File parentdir = file;
+    do {
+      parentdir = parentdir.getParentFile();
+      if (parentdir == null) return;
+    } while (!parentdir.getName().equals("examples"));
+    parentdir = parentdir.getParentFile();
+    if (parentdir == null) return;
+    //System.out.println("parent dir " + parentdir.getPath());
+    Map<String,String> duplist = new HashMap<String,String>();
+    for (LinkedList<File> dirlist : Base.importToLibraryTable.values()) {
+      if (dirlist.size() > 1) {
+        for (File dir : dirlist) {
+          if (parentdir.equals(dir)) {
+            for (File dup : dirlist) {
+              if (dup != dir) {
+                duplist.put(dup.getPath(), "dup");
+              }
+            }
+            break;
+          }
+        }
+      }
+    }
+    if (duplist.size() > 0) {
+      System.err.println(_("Duplicate libraries:"));
+      System.err.println(I18n.format(_("      using: {0}"), parentdir.getPath()));
+      for (String dup : duplist.keySet()) {
+        System.err.println(I18n.format(_("  not using: {0}"), dup));
+      }
+    }
+  }
 
   protected boolean exportApplet(boolean usingProgrammer) throws Exception {
     return exportApplet(tempBuildFolder.getAbsolutePath(), usingProgrammer);
